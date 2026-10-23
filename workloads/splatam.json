@@ -1,0 +1,65 @@
+{
+  "format": "cisda-workload/v1",
+  "name": "splatam-compact",
+  "model": "SplaTAM",
+  "threshold": [0.01, 0.01, 0.01, 0.005, 0.005, 0.005],
+  "pose_hessian_diagonal": [4.0, 4.0, 4.0, 2.0, 2.0, 2.0],
+  "mapping_tiles": [
+    {"id": 0, "arrival": 0, "cost_cycles": 18, "gaussians": [7, 9]},
+    {"id": 1, "arrival": 1, "cost_cycles": 14, "gaussians": [7]},
+    {"id": 2, "arrival": 2, "cost_cycles": 12, "gaussians": [12]}
+  ],
+  "gaussians": [
+    {
+      "id": 7,
+      "version": 3,
+      "group": 0,
+      "history": [1, 1, 0, 1],
+      "counter": 3,
+      "resident": true,
+      "fields": {"position": [0.0, 0.1, 1.0], "color": [0.7, 0.2, 0.1], "scale": [0.04], "opacity": [0.8]},
+      "updated_fields": {"position": [0.001, 0.1, 1.0], "color": [0.7, 0.201, 0.1], "scale": [0.04], "opacity": [0.8]},
+      "impact": [0.002, 0.001, 0.001, 0.0005, 0.0002, 0.0001],
+      "impact_valid": true,
+      "impact_ready_ns": 0,
+      "coverage_changed": false
+    },
+    {
+      "id": 9,
+      "version": 5,
+      "group": 0,
+      "history": [1, 1, 1, 1],
+      "counter": 3,
+      "resident": true,
+      "fields": {"position": [0.2, 0.0, 1.2], "color": [0.1, 0.6, 0.2], "scale": [0.05], "opacity": [0.7]},
+      "updated_fields": {"position": [0.23, 0.0, 1.2], "color": [0.1, 0.64, 0.2], "scale": [0.05], "opacity": [0.72]},
+      "impact": [0.018, 0.004, 0.002, 0.001, 0.001, 0.0005],
+      "impact_valid": true,
+      "impact_ready_ns": 0,
+      "coverage_changed": false
+    },
+    {
+      "id": 12,
+      "version": 2,
+      "group": 0,
+      "history": [1, 0],
+      "counter": 3,
+      "resident": true,
+      "fields": {"position": [-0.1, 0.1, 0.9], "color": [0.2, 0.2, 0.8], "scale": [0.03], "opacity": [0.9]},
+      "updated_fields": {"position": [-0.1, 0.1, 0.9], "color": [0.2, 0.2, 0.801], "scale": [0.03], "opacity": [0.9]},
+      "impact": [0.001, 0.001, 0.001, 0.0002, 0.0002, 0.0002],
+      "impact_valid": true,
+      "impact_ready_ns": 85,
+      "coverage_changed": false
+    }
+  ],
+  "tracking_tiles": [
+    {"id": 0, "retention_deadline_ns": 260},
+    {"id": 1, "retention_deadline_ns": 280}
+  ],
+  "rays": [
+    {"id": 101, "tile": 0, "gaussians": [7, 9], "cost_cycles": 16, "gradient": [0.08, -0.04, 0.02, 0.01, 0.0, -0.01], "corrected_gradient": [0.07, -0.03, 0.02, 0.008, 0.0, -0.008], "avoidable_read_bytes": 64},
+    {"id": 102, "tile": 0, "gaussians": [12], "cost_cycles": 10, "gradient": [0.02, 0.01, -0.01, 0.0, 0.002, 0.0], "corrected_gradient": [0.02, 0.01, -0.01, 0.0, 0.002, 0.0], "avoidable_read_bytes": 32},
+    {"id": 103, "tile": 1, "gaussians": [7], "cost_cycles": 12, "gradient": [-0.01, 0.02, 0.01, 0.003, -0.002, 0.001], "corrected_gradient": [-0.01, 0.02, 0.01, 0.003, -0.002, 0.001], "avoidable_read_bytes": 32}
+  ]
+}

@@ -1,0 +1,65 @@
+{
+  "format": "cisda-workload/v1",
+  "name": "vtgaussian-slam-compact",
+  "model": "VTGaussian-SLAM",
+  "threshold": [0.009, 0.009, 0.009, 0.004, 0.004, 0.004],
+  "pose_hessian_diagonal": [4.5, 4.5, 4.5, 2.2, 2.2, 2.2],
+  "mapping_tiles": [
+    {"id": 30, "arrival": 0, "cost_cycles": 17, "gaussians": [51, 58]},
+    {"id": 31, "arrival": 1, "cost_cycles": 12, "gaussians": [51]},
+    {"id": 32, "arrival": 2, "cost_cycles": 14, "gaussians": [63]}
+  ],
+  "gaussians": [
+    {
+      "id": 51,
+      "version": 9,
+      "group": 2,
+      "history": [1, 1, 0, 1],
+      "counter": 3,
+      "resident": true,
+      "fields": {"color": [0.6, 0.2, 0.2], "opacity": [0.8], "radius": [2.2]},
+      "updated_fields": {"color": [0.601, 0.2, 0.2], "opacity": [0.8], "radius": [2.2]},
+      "impact": [0.0015, 0.001, 0.001, 0.0003, 0.0002, 0.0002],
+      "impact_valid": true,
+      "impact_ready_ns": 0,
+      "coverage_changed": false
+    },
+    {
+      "id": 58,
+      "version": 7,
+      "group": 2,
+      "history": [1, 1, 1, 1],
+      "counter": 3,
+      "resident": true,
+      "fields": {"color": [0.2, 0.7, 0.2], "opacity": [0.7], "radius": [1.8]},
+      "updated_fields": {"color": [0.25, 0.72, 0.2], "opacity": [0.74], "radius": [2.3]},
+      "impact": [0.016, 0.004, 0.002, 0.001, 0.001, 0.0008],
+      "impact_valid": true,
+      "impact_ready_ns": 0,
+      "coverage_changed": true
+    },
+    {
+      "id": 63,
+      "version": 5,
+      "group": 2,
+      "history": [1],
+      "counter": 3,
+      "resident": true,
+      "fields": {"color": [0.2, 0.3, 0.8], "opacity": [0.9], "radius": [1.5]},
+      "updated_fields": {"color": [0.2, 0.301, 0.8], "opacity": [0.9], "radius": [1.5]},
+      "impact": [0.001, 0.001, 0.001, 0.0002, 0.0002, 0.0002],
+      "impact_valid": true,
+      "impact_ready_ns": 80,
+      "coverage_changed": false
+    }
+  ],
+  "tracking_tiles": [
+    {"id": 40, "retention_deadline_ns": 250},
+    {"id": 41, "retention_deadline_ns": 275}
+  ],
+  "rays": [
+    {"id": 301, "tile": 40, "gaussians": [51, 58], "cost_cycles": 15, "gradient": [0.07, -0.04, 0.02, 0.01, 0.0, -0.008], "corrected_gradient": [0.055, -0.028, 0.018, 0.007, 0.0, -0.006], "avoidable_read_bytes": 48},
+    {"id": 302, "tile": 40, "gaussians": [63], "cost_cycles": 9, "gradient": [0.015, 0.01, -0.008, 0.0, 0.001, 0.0], "corrected_gradient": [0.015, 0.01, -0.008, 0.0, 0.001, 0.0], "avoidable_read_bytes": 24},
+    {"id": 303, "tile": 41, "gaussians": [51], "cost_cycles": 11, "gradient": [-0.01, 0.015, 0.01, 0.002, -0.002, 0.001], "corrected_gradient": [-0.01, 0.015, 0.01, 0.002, -0.002, 0.001], "avoidable_read_bytes": 24}
+  ]
+}
