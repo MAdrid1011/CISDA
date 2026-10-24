@@ -1,65 +1,9 @@
 {
-  "format": "cisda-workload/v1",
-  "name": "gaussian-slam-compact",
-  "model": "Gaussian-SLAM",
-  "threshold": [0.012, 0.012, 0.012, 0.006, 0.006, 0.006],
-  "pose_hessian_diagonal": [5.0, 5.0, 5.0, 2.5, 2.5, 2.5],
-  "mapping_tiles": [
-    {"id": 10, "arrival": 0, "cost_cycles": 20, "gaussians": [31, 37]},
-    {"id": 11, "arrival": 1, "cost_cycles": 13, "gaussians": [31]},
-    {"id": 12, "arrival": 2, "cost_cycles": 15, "gaussians": [42]}
-  ],
-  "gaussians": [
-    {
-      "id": 31,
-      "version": 8,
-      "group": 1,
-      "history": [1, 1, 1, 0],
-      "counter": 3,
-      "resident": true,
-      "fields": {"position": [0.0, 0.0, 1.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.04, 0.04, 0.04], "color": [0.5, 0.4, 0.3], "opacity": [0.8]},
-      "updated_fields": {"position": [0.001, 0.0, 1.0], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.04, 0.04, 0.04], "color": [0.501, 0.4, 0.3], "opacity": [0.8]},
-      "impact": [0.002, 0.001, 0.001, 0.0004, 0.0004, 0.0003],
-      "impact_valid": true,
-      "impact_ready_ns": 0,
-      "coverage_changed": false
-    },
-    {
-      "id": 37,
-      "version": 6,
-      "group": 1,
-      "history": [1, 1, 1, 1],
-      "counter": 3,
-      "resident": true,
-      "fields": {"position": [0.3, -0.1, 1.1], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.05, 0.04, 0.05], "color": [0.1, 0.7, 0.2], "opacity": [0.75]},
-      "updated_fields": {"position": [0.34, -0.1, 1.1], "rotation": [0.999, 0.01, 0.0, 0.0], "scale": [0.052, 0.04, 0.05], "color": [0.1, 0.72, 0.2], "opacity": [0.77]},
-      "impact": [0.02, 0.005, 0.003, 0.002, 0.001, 0.001],
-      "impact_valid": true,
-      "impact_ready_ns": 0,
-      "coverage_changed": false
-    },
-    {
-      "id": 42,
-      "version": 4,
-      "group": 1,
-      "history": [0, 1, 1],
-      "counter": 3,
-      "resident": false,
-      "fields": {"position": [-0.2, 0.2, 1.3], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.03, 0.03, 0.03], "color": [0.2, 0.3, 0.8], "opacity": [0.9]},
-      "updated_fields": {"position": [-0.2, 0.2, 1.3], "rotation": [1.0, 0.0, 0.0, 0.0], "scale": [0.03, 0.03, 0.03], "color": [0.2, 0.301, 0.8], "opacity": [0.9]},
-      "impact": [0.001, 0.001, 0.001, 0.0003, 0.0002, 0.0002],
-      "impact_valid": true,
-      "impact_ready_ns": 90,
-      "coverage_changed": false
-    }
-  ],
-  "tracking_tiles": [
-    {"id": 20, "retention_deadline_ns": 300},
-    {"id": 21, "retention_deadline_ns": 320}
-  ],
-  "rays": [
-    {"id": 201, "tile": 20, "gaussians": [31, 37], "cost_cycles": 18, "gradient": [0.09, -0.03, 0.03, 0.012, 0.0, -0.01], "corrected_gradient": [0.075, -0.025, 0.028, 0.009, 0.0, -0.008], "avoidable_read_bytes": 96},
-    {"id": 202, "tile": 20, "gaussians": [42], "cost_cycles": 11, "gradient": [0.01, 0.02, -0.01, 0.0, 0.002, 0.0], "corrected_gradient": [0.01, 0.02, -0.01, 0.0, 0.002, 0.0], "avoidable_read_bytes": 48},
-    {"id": 203, "tile": 21, "gaussians": [31], "cost_cycles": 13, "gradient": [-0.02, 0.01, 0.02, 0.004, -0.002, 0.002], "corrected_gradient": [-0.02, 0.01, 0.02, 0.004, -0.002, 0.002], "avoidable_read_bytes": 48}
-  ]
+  "format": "cisda-workload-manifest/v1",
+  "name": "gaussian-slam-tum-rgbd-freiburg1-desk",
+  "workload": "Gaussian-SLAM",
+  "compiled_workload": "../local/bundles/gaussian_slam.json",
+  "native_capture": "../local/captures/gaussian_slam.jsonl",
+  "model_root": "../local/models/Gaussian-SLAM",
+  "dataset_root": "../local/data/TUM_RGBD/rgbd_dataset_freiburg1_desk"
 }

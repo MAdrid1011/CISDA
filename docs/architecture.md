@@ -1,110 +1,191 @@
 # Architecture and Mechanisms
 
-## Execution Model
+## End-to-End Dataflow
 
-CISDA treats Mapping and Tracking as one dependency-driven execution graph.
-Mapping tiles progressively complete Gaussian gradients. A Tracking ray may
-start with version-matched visible attributes before the corresponding primary
-state update completes, but its tile contribution cannot enter the pose solve
-until every speculative dependency is confirmed or corrected.
+CISDA represents Mapping and Tracking as one dependency graph. Mapping tile
+fragments make individual Gaussian updates ready. ImpactPIM updates primary
+state and resolves which version Tracking may observe. Tracking ray results
+remain pending until every predicted input is confirmed or replaced. Only
+validated tile contributions enter the final pose reduction.
 
-The simulator uses nanoseconds as the common timeline for the 500 MHz GS array
-and 200 MHz ImpactPIM units. The included workloads are compact dependency
-traces intended to exercise the mechanisms, not captured images or published
-evaluation data.
+The four stages use three granularities:
+
+| Stage | Unit | Function |
+| --- | --- | --- |
+| I | image tile | Mapping render, loss, backward pass, gradient fragments |
+| II | Gaussian | state update, impact validation, visible-state merge |
+| III | ray | versioned projection and depth-ordered composition |
+| IV | image tile | contribution validation, replacement, pose reduction |
+
+`src/simulator.cpp` connects all four stages to one 500 MHz ASIC timeline and
+the 200 MHz PIM domain. A run completes only after Stage IV records one pose
+commit.
 
 ## Stage I: Gaussian-Aware Tile Ordering
 
-`ordering.py` implements the paper's online ordering algorithm. For each
-Gaussian, it tracks the complete set of unissued Mapping tiles that still
-produce gradient fragments. Candidate tile sets are ranked by the number of
-Gaussian gradients they complete divided by their estimated cost. When no
-complete candidate set exists, the oldest ready tile is selected.
+`src/ordering.cpp` consumes the native rasterizer's stable Gaussian IDs,
+point-list indices, and complete tile ranges. For every Gaussian, it maintains
+the unissued source set `R(g)`. Every distinct nonempty `R(g)` is a candidate
+tile set. Candidates are scored by the number of Gaussian gradients completed
+by the set divided by the sum of its captured relation costs. The winning set
+is issued in arrival order, removed from all source sets, and all candidates
+are rescored. An oldest-ready selection handles tiles that contain no remaining
+Gaussian source.
 
-The issued order may further prioritize a tile on the reverse path from a
-pending Tracking contribution. This preserves the Gaussian-aware base order as
-the deterministic fallback.
+This stage preserves full source completion: a Gaussian cannot enter its state
+update merely because one of several contributing tiles has finished.
+`src/dependency_tables.cpp` records every emitted fragment, reduces fragments
+by Gaussian ID, and removes the issuing tile from the unfinished-source XOR.
+It exposes a Gaussian only after the XOR and source count both reach zero.
+Tile loss ownership and boundary-neighbor dependencies remain attached to the
+frozen Mapping snapshot and captured pose context.
 
 ## Stage II: Impact-Constrained State Merge
 
-`impact_pim.py` separates the primary Mapping state from the Tracking-visible
-state. Every completed Gaussian gradient updates primary state. ImpactPIM then
-replaces that Gaussian's prior contribution in its group and compares the
-six-dimensional cumulative bound with the configured translation and rotation
-threshold. Each compact workload has one active impact group, so its local
-budget equals the global threshold and the sum-of-group-budgets rule holds
-directly.
+`src/impact_pim.cpp` separates primary Mapping state from the version visible
+to Tracking. Every gradient-ready update writes primary attributes and
+optimizer state. Gaussian IDs shard update commands across eight PIM owners.
 
-A valid version, coverage, and impact description within the bound produces a
-reuse confirmation and leaves visible attributes unchanged. An invalid context
-or exceeded component advances the visible version and writes only changed
-fields. Eight owner-local units model the paper configuration and serialize
-updates that map to the same owner.
+For a valid pose, coverage, and target-version description, the state engine
+replaces the Gaussian's previous six-component contribution in its group and
+updates the cumulative bound. If every component remains within the group
+budget, visible attributes stay unchanged and a versioned confirmation is
+returned. Otherwise, the merge path advances the visible version and returns
+the required fields to the ASIC. Missing coefficients, stale versions, or
+invalid coverage always take this conservative advance path.
+
+Each observed Gaussian has an explicit primary and visible version record.
+The current pass continues to read the frozen source version, while completed
+updates bind the next Mapping pass to the target primary version. Ready
+Gaussians are ordered by the number of rendering and validation consumers they
+unblock. Per-group six-component budgets are allocated from one global bound,
+so their component-wise sum does not exceed that bound.
+
+The current native captures intentionally carry conservative withdrawal
+evidence rather than invented six-component impact coefficients. Their runs
+therefore exercise primary update, owner routing, command completion, visible
+advance, and predictor feedback without reporting fabricated confirmations.
 
 ## Stage III: Predictive Ray Rendering
 
-`predictor.py` implements a four-decision history per Gaussian and 2,048
-two-bit saturating counters. Gaussian-ID bits are XOR-folded into eleven bits;
-the low four bits are combined with the short history. A valid history and a
-set counter MSB predict reuse.
+`src/predictor.cpp` implements one four-bit actual-decision history per
+Gaussian and a shared table of 2,048 two-bit saturating counters. Gaussian-ID
+bits are XOR-folded into 11 bits; the low four folded bits are XORed with the
+history. A prediction may select old attributes only when:
 
-`simulator.py` creates one prediction record for each Gaussian update and
-merges all dependent tiles into it. Speculative inputs are admitted only when
-the old visible attributes are resident and version matched. Rays preserve
-depth-ordered Gaussian lists from the workload. Feedback is applied once per
-shared prediction after the actual ImpactPIM decision.
+- all four history bits are valid;
+- the selected counter's most significant bit is set;
+- the visible attributes are resident; and
+- their version matches the request.
+
+One query is shared by all dependent tile requests for the same update and
+Tracking context. The ImpactPIM response updates the stored counter index once
+and shifts the actual decision into history. Cold histories wait for the
+actual attributes, so the included conservative captures do not create false
+speculative work.
+
+The scheduled Tracking rasterizer supplies the complete point-list order for
+each tile. `src/shared_array.cpp` consumes that order directly, checks the CAM
+entry's map and pose versions, extends residency for later consumers, and
+issues a fill for every missing or mismatched row. Each pending contribution
+retains its map, pose, and loss contexts until its input and validation
+dependencies are resolved.
 
 ## Stage IV: Tile Result Maintenance
 
-Ray gradients are retained by tile together with their map and validation
-dependencies. A confirmation keeps the existing contribution. An advance
-reruns only affected rays with target-version attributes; a coverage change
-also records a workset rebuild. Each tile emits exactly one current
-contribution. Tile contributions are reduced by tile ID, and the six pose
-components are solved against the workload's diagonal Hessian only after all
-required contributions are valid.
+Tracking results carry map version, pose context, loss context, and pending
+Gaussian decisions. A confirmation validates the existing tile contribution.
+An advance invalidates contributions that consumed old attributes and schedules
+ray-mode replacement work with the target version. Coverage or depth-order
+changes require a new ordered workset before replacement.
+
+The tile table keeps one current contribution per tile. Contributions are
+reduced in deterministic tile order after all validation dependencies clear;
+the pose commit is the terminal event of the simulation. The committed value
+is decoded from the capture's authoritative final native pose record, preserving
+its quaternion/translation or camera-to-world matrix representation.
+`src/tile_maintenance.cpp` implements the versioned slot transition. A
+correction invalidates the old slot, subtracts the old contribution, adds the
+new contribution, and marks the target-version slot valid. A structural
+response rebuilds the affected workset before replacement. Loss-dependent
+expansion remains scoped to captured dependency evidence.
 
 ## Shared GS Array
 
-`scheduler.py` models 24 independently configurable compute clusters arranged
-as four six-cluster residency groups. Each task packet selects one of three
-connections:
+`src/shared_array.cpp` models 24 compute clusters in four six-cluster residency
+groups. Every packet chooses one connection mode:
 
-- `gaussian`: attribute broadcast and projection;
-- `ray`: depth-ordered color, depth, and transmittance composition; or
-- `tile`: local derivative and hierarchical reduction work.
+- `gaussian` broadcasts attributes for projection;
+- `ray` performs depth-ordered color, depth, and transmittance composition;
+- `tile` performs local derivatives and hierarchical reductions.
 
-The issuer favors the residency group associated with the packet's Gaussian
-IDs and accounts for packet-boundary mode changes. Mapping, Tracking, and
-correction packets use the same cluster pool.
+The issuer selects the earliest available cluster in the packet's preferred
+residency group. A mode change is counted only at a packet boundary. Mapping,
+Tracking, and replacement work use the same cluster pool.
 
-## Reuse-Window-Guided Scheduling
+Each cluster models 16 FP32 FMA lanes arranged as 4 by 4, four EXP/LOG lanes,
+and two reciprocal/square-root lanes. Each six-cluster group owns a 256-entry
+residency CAM and a 32 KiB Gaussian Data SRAM. The four groups share the
+128 KiB SPM. A separate 16 KiB Frame Tile Buffer streams RGB-D tile inputs.
 
-The reverse scheduler starts from tiles containing speculative rays, follows
-their Gaussian dependencies to Mapping producers, and estimates the remaining
-validation path. A producer receives priority only when that path can finish
-within the tile's retention window. Eligible producers are ranked by unique
-avoidable attribute bytes divided by estimated completion time; ties use the
-Gaussian-aware order.
+## Dependency Tables and Storage Credits
 
-## Workload Variants
+`src/dependency_tables.cpp` maintains distinct input-readiness and
+result-validation tables. Requests with the same Gaussian update and Tracking
+context share one entry. Source counts plus the unfinished-source XOR identify
+the last producer, and consumer counts propagate priority when an update
+becomes ready.
 
-The three included traces preserve the model-specific state layouts used by
-the mechanisms:
+SPM and Frame Tile Buffer reservations precede issue. Completion and correction
+space is reserved before speculative work. Candidates without credits return
+to regular scheduling; eligible candidates propagate priority to both the ASIC
+issuer and PIM queue. Shared input/version tasks merge, and equal-priority
+near-memory requests group by row.
 
-| Workload | ImpactPIM-visible fields represented |
-| --- | --- |
-| SplaTAM | position, color, isotropic scale, opacity |
-| Gaussian-SLAM | position, rotation, scale, color, opacity |
-| VTGaussian-SLAM | color, opacity, radius with fixed view binding |
+## Reverse Dependency Scheduling
 
-Each trace includes a confirmed reuse, a visible-state advance, a
-non-speculative dependency, and tile-level final validation. The
-VTGaussian-SLAM trace additionally exercises a coverage-changing correction.
+`src/reverse_scheduler.cpp` begins with pending speculative tile results and
+walks backward through Gaussian validation to missing Mapping gradients. Each
+candidate carries a remaining retention window, longest unfinished path,
+deduplicated avoidable attribute bytes, and wait time. A candidate is eligible
+only when its path fits within the retention window. Eligible candidates are
+ranked by avoidable bytes per path cycle, then by nearer deadline and longer
+wait. Shared reads are counted once.
 
-## Reported Values
+When the predictor admits no speculative input, there is no pending reuse
+result to prioritize; the scheduler correctly reports zero candidates while
+the normal Gaussian-aware order remains active.
 
-The public result is intentionally compact. It contains absolute completion
-times, mechanism event counts, bytes written to primary and visible state, and
-the final pose update. The simulator does not produce baseline reproduction,
-normalized speedup, energy, power, area, or parameter-sweep results.
+## ImpactPIM Organization
+
+`src/impact_pim.cpp` models eight owners, with two units per LPDDR5 die and one
+four-bank group per owner. Gaussian IDs select the die, unit, bank, and row;
+existing and target-version state use four-bank interleaving. Every update has
+a 32-byte descriptor binding its Gaussian, version, gradient readiness, and
+validation targets.
+
+The update entry writes primary state and optimizer history. The validation
+entry executes move, difference, absolute-value, reduction,
+multiply-accumulate, comparison, and field-selection operations using the
+workload field layout. The write selector advances only selected visible fields
+when a valid mask is available and conservatively selects the full workload
+layout when the native capture has no field mask. Completion records carry
+version and context tags; late descriptions re-enter validation against the
+target primary state.
+
+Refresh arbitration drains and precharges the target bank pair, records the
+refresh, and resumes retained program state after recovery. Other owners remain
+independently addressable. Same-priority descriptors are grouped by row before
+dispatch.
+
+## Timing and State Accounting
+
+`src/workload.cpp` decodes native JSON Lines records, including gzip streams
+and little-endian base64 tensors. The simulator checks block conservation and
+uses captured Gaussian-block relations, examined and blended ray operations,
+active pixels, optimizer objects, and scalar counts. ASIC and PIM work overlap
+on one timeline; completion traffic is charged before the pose commit.
+
+The output is deliberately compact. It reports end-to-end and stage cycles,
+updated objects and scalars, state bytes, PIM commands, prediction and merge
+events, shared-array mode tasks, tile validation, and the final commit count.

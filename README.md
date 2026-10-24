@@ -1,66 +1,75 @@
 # CISDA Simulator
 
-This repository contains the mechanism-level simulator for **CISDA**, a
-3DGS-SLAM architecture for cross-stage speculative dataflow and
-impact-constrained in-memory merging.
+CISDA is a C++20 mechanism-level simulator for continuity-guided,
+mixed-granularity 3D Gaussian Splatting SLAM. It executes Mapping and Tracking
+on one end-to-end timeline and reports absolute cycle, event, and byte counts.
 
-The release focuses on the architecture mechanisms. It includes compact
-workloads for SplaTAM, Gaussian-SLAM, and VTGaussian-SLAM and reports absolute
-latency, task, decision, correction, and state-traffic values. It does not
-contain application source code, datasets, RTL, platform measurements, or
-area and power models.
+The simulator implements:
+
+- Gaussian-dependency-aware online Mapping tile ordering;
+- a 24-cluster shared GS array with Gaussian, ray, and tile modes;
+- a four-decision history table and 2,048 two-bit reuse counters;
+- reuse-window-guided reverse dependency scheduling;
+- eight-owner ImpactPIM update, validation, and selective merge flow;
+- versioned primary and Tracking-visible Gaussian state;
+- pending tile validation, local replacement, and final pose commit.
+
+The source tree is self-contained. Large workload assets stay in the ignored
+`local/` directory and are not part of the Git repository.
+
+## Build
+
+Requirements are CMake 3.22 or newer, a C++20 compiler, nlohmann/json 3.11 or
+newer, and zlib.
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+cmake --install build --prefix "$PWD/install"
+export PATH="$PWD/install/bin:$PATH"
+```
+
+## Workload Assets
+
+The included manifests select the real SplaTAM, Gaussian-SLAM, and
+VTGaussian-SLAM workloads on TUM-RGBD `rgbd_dataset_freiburg1_desk`. Before a
+run, keep the following local assets under the repository root:
+
+```text
+local/
+  bundles/{splatam,gaussian_slam,vtgaussian_slam}.json
+  captures/{splatam.jsonl.gz,gaussian_slam.jsonl,vtgaussian_slam.jsonl}
+  data/TUM_RGBD/rgbd_dataset_freiburg1_desk/
+  models/{SplaTAM,Gaussian-SLAM,VTGaussian-SLAM}/
+```
+
+Each manifest uses relative paths and validates the model, dataset, compiled
+operator workload, and native capture before simulation. See
+[Workload Inputs](docs/workloads.md) for the input contract.
 
 ## Run
 
-Python 3.10 or newer is required.
+The simulator has one runtime interface:
 
 ```bash
-python -m venv .venv
-. .venv/bin/activate
-python -m pip install .
+cisda-sim WORKLOAD.json
+```
+
+For example:
+
+```bash
 cisda-sim workloads/splatam.json
 ```
 
-The same command accepts either of the other included workloads:
+The other manifests are `workloads/gaussian_slam.json` and
+`workloads/vtgaussian_slam.json`. The command writes one
+`cisda-simulation-result/v1` JSON document to standard output.
 
-```text
-workloads/gaussian_slam.json
-workloads/vtgaussian_slam.json
-```
+The result contains absolute end-to-end cycles and latency, four-stage
+completion cycles, mechanism event counts, primary and visible state bytes,
+and one validated pose commit. It does not emit comparison or normalized
+results.
 
-The command writes one `cisda-result/v1` JSON document to standard output.
-Reported values are absolute simulator results for the selected compact
-workload; they are not paper evaluation tables or baseline comparisons.
-
-## Simulator Scope
-
-The simulator executes one end-to-end mechanism path:
-
-1. Gaussian-aware Mapping tile ordering accelerates complete-gradient
-   availability.
-2. The reverse dataflow scheduler prioritizes Mapping work that can validate
-   retained Tracking results before their reuse window expires.
-3. A shared 24-cluster GS array runs Gaussian, ray, and tile packets and tracks
-   task-packet mode changes.
-4. The continuity-guided predictor shares one old-attribute decision across
-   rays that depend on the same Gaussian update.
-5. Eight ImpactPIM units update primary state, accumulate six-dimensional pose
-   impact, and either confirm the visible state or write changed fields.
-6. Tracking contributions remain pending until validation. Failed speculation
-   triggers tile-local correction, and structural changes rebuild the affected
-   workset.
-7. Valid tile contributions are reduced in fixed order before one final pose
-   commit.
-
-See [Architecture and Mechanisms](docs/architecture.md) for the module-level
-description and the correspondence between the paper dataflow and simulator.
-
-## Output
-
-The result contains:
-
-- total and per-stage completion time in nanoseconds;
-- Gaussian-aware and final Mapping tile issue order;
-- absolute Mapping, Tracking, prediction, merge, correction, and commit counts;
-- primary-state and tracking-visible-state bytes written; and
-- the committed six-dimensional pose update for the compact workload.
+See [Architecture and Mechanisms](docs/architecture.md) for the simulator
+design. The [Mechanism Correspondence](docs/mechanism-correspondence.md) maps
+every Section III and Section IV mechanism to its C++ state and result fields.
