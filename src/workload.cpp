@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -240,6 +241,147 @@ std::vector<double> decode_f32(const json &tensor, const char *name) {
   return values;
 }
 
+void append_numeric_values(const json &value, std::vector<double> &result,
+                           const char *name) {
+  if (value.is_number()) {
+    const double number = value.get<double>();
+    if (!std::isfinite(number)) {
+      throw std::runtime_error(std::string(name) +
+                               " contains a non-finite value");
+    }
+    result.push_back(number);
+    return;
+  }
+  if (value.is_array()) {
+    for (const json &entry : value) {
+      append_numeric_values(entry, result, name);
+    }
+    return;
+  }
+  throw std::runtime_error(std::string(name) + " must contain numeric values");
+}
+
+std::vector<double> pose_values(const json &value, const char *name) {
+  if (value.is_object() &&
+      value.value("encoding", "") == "base64-little-endian-v1") {
+    return decode_f32(value, name);
+  }
+  std::vector<double> result;
+  append_numeric_values(value, result, name);
+  return result;
+}
+
+std::array<double, 3> quaternion_log(const std::array<double, 4> &input) {
+  double norm = 0.0;
+  for (const double value : input) {
+    norm += value * value;
+  }
+  if (!(norm > 0.0)) {
+    throw std::runtime_error("impact pose contains a zero quaternion");
+  }
+  norm = std::sqrt(norm);
+  std::array<double, 4> quaternion{};
+  for (std::size_t index = 0; index < quaternion.size(); ++index) {
+    quaternion.at(index) = input.at(index) / norm;
+  }
+  if (quaternion.at(0) < 0.0) {
+    for (double &value : quaternion) {
+      value = -value;
+    }
+  }
+  const double vector_norm = std::sqrt(quaternion.at(1) * quaternion.at(1) +
+                                       quaternion.at(2) * quaternion.at(2) +
+                                       quaternion.at(3) * quaternion.at(3));
+  if (vector_norm < 1.0e-15) {
+    return {2.0 * quaternion.at(1), 2.0 * quaternion.at(2),
+            2.0 * quaternion.at(3)};
+  }
+  const double angle = 2.0 * std::atan2(vector_norm, quaternion.at(0));
+  return {angle * quaternion.at(1) / vector_norm,
+          angle * quaternion.at(2) / vector_norm,
+          angle * quaternion.at(3) / vector_norm};
+}
+
+std::optional<std::array<double, 6>> pose_impact(const json &payload) {
+  if (payload.contains("impact_description")) {
+    const json &description = payload.at("impact_description");
+    if (description.contains("pose_update_delta")) {
+      const std::vector<double> values = pose_values(
+          description.at("pose_update_delta"), "impact pose_update_delta");
+      if (values.size() != 6) {
+        throw std::runtime_error(
+            "impact pose_update_delta must contain six values");
+      }
+      std::array<double, 6> result{};
+      std::copy(values.begin(), values.end(), result.begin());
+      return result;
+    }
+  }
+  if (!payload.contains("baseline_tracking") ||
+      !payload.contains("withdrawn_tracking")) {
+    return std::nullopt;
+  }
+  const json &baseline = payload.at("baseline_tracking");
+  const json &withdrawn = payload.at("withdrawn_tracking");
+  if (!baseline.contains("committed_pose") ||
+      !withdrawn.contains("committed_pose")) {
+    return std::nullopt;
+  }
+  const json &baseline_pose = baseline.at("committed_pose");
+  const json &withdrawn_pose = withdrawn.at("committed_pose");
+  std::array<double, 6> result{};
+  if (baseline_pose.contains("quaternion") &&
+      baseline_pose.contains("translation") &&
+      withdrawn_pose.contains("quaternion") &&
+      withdrawn_pose.contains("translation")) {
+    const std::vector<double> baseline_quaternion =
+        pose_values(baseline_pose.at("quaternion"), "baseline quaternion");
+    const std::vector<double> withdrawn_quaternion =
+        pose_values(withdrawn_pose.at("quaternion"), "withdrawn quaternion");
+    const std::vector<double> baseline_translation =
+        pose_values(baseline_pose.at("translation"), "baseline translation");
+    const std::vector<double> withdrawn_translation =
+        pose_values(withdrawn_pose.at("translation"), "withdrawn translation");
+    if (baseline_quaternion.size() != 4 || withdrawn_quaternion.size() != 4 ||
+        baseline_translation.size() != 3 || withdrawn_translation.size() != 3) {
+      throw std::runtime_error("impact committed poses have invalid shapes");
+    }
+    for (std::size_t component = 0; component < 3; ++component) {
+      result.at(component) = withdrawn_translation.at(component) -
+                             baseline_translation.at(component);
+    }
+    const std::array<double, 4> baseline_q{
+        baseline_quaternion.at(0), baseline_quaternion.at(1),
+        baseline_quaternion.at(2), baseline_quaternion.at(3)};
+    const std::array<double, 4> withdrawn_q{
+        withdrawn_quaternion.at(0), withdrawn_quaternion.at(1),
+        withdrawn_quaternion.at(2), withdrawn_quaternion.at(3)};
+    const std::array<double, 4> relative{
+        withdrawn_q.at(0) * baseline_q.at(0) +
+            withdrawn_q.at(1) * baseline_q.at(1) +
+            withdrawn_q.at(2) * baseline_q.at(2) +
+            withdrawn_q.at(3) * baseline_q.at(3),
+        -withdrawn_q.at(0) * baseline_q.at(1) +
+            withdrawn_q.at(1) * baseline_q.at(0) -
+            withdrawn_q.at(2) * baseline_q.at(3) +
+            withdrawn_q.at(3) * baseline_q.at(2),
+        -withdrawn_q.at(0) * baseline_q.at(2) +
+            withdrawn_q.at(1) * baseline_q.at(3) +
+            withdrawn_q.at(2) * baseline_q.at(0) -
+            withdrawn_q.at(3) * baseline_q.at(1),
+        -withdrawn_q.at(0) * baseline_q.at(3) -
+            withdrawn_q.at(1) * baseline_q.at(2) +
+            withdrawn_q.at(2) * baseline_q.at(1) +
+            withdrawn_q.at(3) * baseline_q.at(0)};
+    const std::array<double, 3> rotation = quaternion_log(relative);
+    for (std::size_t component = 0; component < 3; ++component) {
+      result.at(component + 3) = rotation.at(component);
+    }
+    return result;
+  }
+  return std::nullopt;
+}
+
 json decode_pose(const json &payload) {
   const json &pose = payload.at("committed_pose");
   const std::string parameterization =
@@ -347,6 +489,8 @@ CaptureFacts load_capture(const std::filesystem::path &path) {
     }
 
     ImpactObservation observation;
+    observation.sequence =
+        unsigned_value(record.at("sequence"), "impact sequence");
     observation.frame = unsigned_value(payload.at("frame"), "impact frame");
     observation.iteration =
         unsigned_value(payload.at("iteration"), "impact iteration");
@@ -357,6 +501,12 @@ CaptureFacts load_capture(const std::filesystem::path &path) {
     observation.label = payload.at("offline_label").get<std::string>();
     observation.verification_valid =
         payload.at("local_verification").value("outcome", false);
+    observation.contribution = pose_impact(payload);
+    if (observation.contribution.has_value()) {
+      observation.contribution_source = payload.contains("impact_description")
+                                            ? "captured_pose_update_delta"
+                                            : "withdrawal_pose_pair";
+    }
     const json &withdrawal = payload.at("withdrawal");
     observation.source_frame =
         unsigned_value(withdrawal.at("source_frame"), "source_frame");
@@ -369,6 +519,13 @@ CaptureFacts load_capture(const std::filesystem::path &path) {
         payload.at("stable_gaussian_ids").get<std::vector<std::string>>();
     facts.impacts.push_back(std::move(observation));
   });
+
+  std::stable_sort(
+      facts.impacts.begin(), facts.impacts.end(),
+      [](const ImpactObservation &left, const ImpactObservation &right) {
+        return std::tie(left.frame, left.iteration, left.sequence) <
+               std::tie(right.frame, right.iteration, right.sequence);
+      });
 
   if (!final_pose_sequence.has_value() ||
       !pose_records.contains(*final_pose_sequence)) {

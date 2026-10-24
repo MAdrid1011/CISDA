@@ -38,7 +38,8 @@ public:
   void bind_versions(std::uint64_t visible_version,
                      std::uint64_t primary_version);
   void allocate_group_budgets(const std::vector<std::uint64_t> &groups);
-  MergeDecision validate(const ImpactDescription &description);
+  MergeDecision validate_group(const ImpactDescription &description,
+                               const std::vector<std::uint64_t> &gaussian_ids);
   void account_primary_updates(std::uint64_t objects, std::uint64_t scalars,
                                std::uint64_t bytes);
   void account_visible_bytes(std::uint64_t bytes);

@@ -11,4 +11,6 @@ mechanism, and committed-pose values.
 The run method connects ordered Mapping tiles, gradient dependencies,
 versioned ImpactPIM decisions, predictive Tracking worksets, reverse
 scheduling, shared-array packets, tile replacement, fixed-order reduction, and
-the final pose transition on one timeline.
+the final pose transition on one timeline. Impact observations query and feed
+back chronologically; reverse priority directly reorders source-tile and
+validation issue.

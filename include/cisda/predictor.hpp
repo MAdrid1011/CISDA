@@ -30,6 +30,7 @@ public:
   std::uint64_t predictions() const;
   std::uint64_t feedback_updates() const;
   std::uint64_t merged_requests() const;
+  std::uint64_t history_ready_queries() const;
 
 private:
   static std::uint16_t fold(std::uint64_t gaussian_id,
@@ -41,6 +42,7 @@ private:
   std::uint64_t predictions_{};
   std::uint64_t feedback_updates_{};
   std::uint64_t merged_requests_{};
+  std::uint64_t history_ready_queries_{};
 };
 
 std::uint64_t numeric_gaussian_id(const std::string &stable_id);

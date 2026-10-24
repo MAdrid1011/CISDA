@@ -11,6 +11,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <map>
@@ -462,33 +463,10 @@ Simulator::run(const std::filesystem::path &manifest_path) const {
     }
   }
 
-  SharedGsArray array;
-  std::unordered_map<std::uint32_t, std::uint64_t> mapping_finish;
-  std::uint64_t owned_loss_tiles = 0;
-  std::uint64_t boundary_dependency_records = 0;
-  const std::uint64_t mapping_rows =
-      input.capture.mapping.gaussians_by_tile.size() /
-      input.capture.mapping.columns;
-  for (const OrderedTile &tile : ordering.tiles) {
-    const std::uint64_t task_cycles =
-        ceil_div(tile.gaussian_relations, kPePerCluster);
-    const ArrayIssue issue =
-        array.issue(ArrayMode::Tile, 0, task_cycles, tile.tile_id);
-    mapping_finish.emplace(tile.tile_id, issue.finish_cycle);
-    const std::uint64_t x = tile.tile_id % input.capture.mapping.columns;
-    const std::uint64_t y = tile.tile_id / input.capture.mapping.columns;
-    boundary_dependency_records += x != 0 ? 1U : 0U;
-    boundary_dependency_records +=
-        x + 1 < input.capture.mapping.columns ? 1U : 0U;
-    boundary_dependency_records += y != 0 ? 1U : 0U;
-    boundary_dependency_records += y + 1 < mapping_rows ? 1U : 0U;
-    ++owned_loss_tiles;
-    static_cast<void>(dependencies.complete_mapping_tile(tile.tile_id));
-  }
-
   ReusePredictor predictor;
-  ImpactPim impact_pim(input.manifest.workload,
-                       {1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4, 1.0e-4});
+  constexpr std::array<double, 6> impact_budget{1.0e-4, 1.0e-4, 1.0e-4,
+                                                1.0e-4, 1.0e-4, 1.0e-4};
+  ImpactPim impact_pim(input.manifest.workload, impact_budget);
   std::vector<std::uint64_t> impact_groups;
   impact_groups.reserve(input.capture.impacts.size());
   for (const ImpactObservation &observation : input.capture.impacts) {
@@ -506,32 +484,141 @@ Simulator::run(const std::filesystem::path &manifest_path) const {
     throw std::runtime_error("SPM recovery credits cannot be reserved");
   }
 
-  struct PendingDecision {
+  std::sort(impact_groups.begin(), impact_groups.end());
+  impact_groups.erase(std::unique(impact_groups.begin(), impact_groups.end()),
+                      impact_groups.end());
+  std::unordered_map<std::uint64_t, std::array<double, 6>> local_budgets;
+  for (const std::uint64_t group : impact_groups) {
+    std::array<double, 6> local{};
+    for (std::size_t component = 0; component < local.size(); ++component) {
+      local.at(component) = impact_budget.at(component) /
+                            static_cast<double>(impact_groups.size());
+    }
+    local_budgets.emplace(group, local);
+  }
+
+  const auto captured_group_decision =
+      [&](const ImpactObservation &observation) {
+        if (!observation.verification_valid ||
+            !observation.contribution.has_value() ||
+            !local_budgets.contains(observation.consumer_group)) {
+          return false;
+        }
+        for (std::size_t component = 0; component < impact_budget.size();
+             ++component) {
+          if (std::abs(observation.contribution->at(component)) >
+              local_budgets.at(observation.consumer_group).at(component)) {
+            return false;
+          }
+        }
+        return true;
+      };
+
+  std::uint64_t captured_history_feedback = 0;
+  std::uint64_t captured_history_descriptions = 0;
+  for (const ImpactObservation &observation : input.capture.impacts) {
+    const bool target_context = observation.frame == pass.frame &&
+                                observation.source_frame == pass.source_frame;
+    if (target_context) {
+      continue;
+    }
+    const bool actual_reuse = captured_group_decision(observation);
+    captured_history_descriptions +=
+        observation.contribution.has_value() ? 1U : 0U;
+    for (const std::string &stable_id : observation.stable_ids) {
+      const ReusePrediction prediction = predictor.query(
+          numeric_gaussian_id(stable_id), observation.source_iteration + 1,
+          observation.frame, true, true,
+          {static_cast<std::uint32_t>(observation.native_tile_index)});
+      predictor.feedback(prediction, actual_reuse);
+      ++captured_history_feedback;
+    }
+  }
+
+  struct PendingMember {
     ReusePrediction prediction;
-    ImpactDescription description;
     std::vector<std::uint32_t> tracking_tiles;
+    std::vector<std::uint32_t> source_tiles;
     std::uint64_t request_key{};
   };
-  std::vector<PendingDecision> decisions;
+  struct PendingGroup {
+    ImpactDescription description;
+    std::vector<PendingMember> members;
+    std::optional<MergeDecision> result;
+  };
+  std::vector<PendingGroup> decisions;
   std::uint64_t speculative_dependencies = 0;
+  std::uint64_t target_history_ready_queries = 0;
+  std::uint64_t target_reuse_predictions = 0;
   std::unordered_map<std::uint32_t, std::uint64_t> pending_by_tile;
   std::unordered_set<std::uint32_t> correction_tiles;
   std::unordered_set<std::uint32_t> rebuild_tiles;
   std::vector<ReverseCandidate> reverse_candidates;
+
+  std::unordered_map<std::uint32_t, std::uint64_t> estimated_mapping_finish;
+  std::uint64_t estimated_finish = 0;
+  for (const OrderedTile &tile : ordering.tiles) {
+    estimated_finish += ceil_div(tile.gaussian_relations, kPePerCluster);
+    estimated_mapping_finish.emplace(tile.tile_id, estimated_finish);
+  }
+
+  std::unordered_set<std::uint32_t> captured_tracking_tiles;
+  for (const StreamingBlock &block : input.capture.streaming_blocks) {
+    captured_tracking_tiles.insert(
+        (block.y / 16) * input.capture.tracking.columns + block.x / 16);
+  }
+  std::unordered_map<std::uint32_t, std::vector<std::uint32_t>>
+      tracking_tiles_by_gaussian;
+  for (const std::uint32_t tile : captured_tracking_tiles) {
+    const auto &workset =
+        input.capture.tracking.depth_ordered_gaussians_by_tile.at(tile);
+    for (const std::uint32_t gaussian : workset) {
+      auto &tiles = tracking_tiles_by_gaussian[gaussian];
+      if (std::ranges::find(tiles, tile) == tiles.end()) {
+        tiles.push_back(tile);
+      }
+    }
+  }
+
   for (const ImpactObservation &observation : input.capture.impacts) {
+    if (observation.frame != pass.frame ||
+        observation.source_frame != pass.source_frame) {
+      continue;
+    }
+    PendingGroup group;
+    if (observation.stable_ids.empty()) {
+      throw std::runtime_error(
+          "impact observation has an empty stable-ID group");
+    }
+    group.description = {
+        observation.verification_valid && observation.contribution.has_value(),
+        true,
+        observation.verification_valid && observation.contribution.has_value(),
+        observation.consumer_group,
+        observation.consumer_generation,
+        numeric_gaussian_id(observation.stable_ids.front()),
+        observation.contribution,
+        std::nullopt};
     for (const std::string &stable_id : observation.stable_ids) {
       const std::uint64_t gaussian_id = numeric_gaussian_id(stable_id);
-      const std::vector<std::uint32_t> tracking_tiles{
-          static_cast<std::uint32_t>(observation.native_tile_index)};
+      std::vector<std::uint32_t> tracking_tiles;
+      const auto selected =
+          input.capture.mapping.selected_stable_indices.find(stable_id);
+      if (selected != input.capture.mapping.selected_stable_indices.end() &&
+          tracking_tiles_by_gaussian.contains(selected->second)) {
+        tracking_tiles = tracking_tiles_by_gaussian.at(selected->second);
+      }
       std::vector<std::uint32_t> sources = mapping_source_tiles(
           input.capture, stable_id, observation.native_tile_index);
       const ReusePrediction prediction =
           predictor.query(gaussian_id, target_version, observation.frame, true,
                           true, tracking_tiles);
+      target_history_ready_queries += prediction.history_valid ? 1U : 0U;
+      target_reuse_predictions += prediction.reuse ? 1U : 0U;
       speculative_dependencies += prediction.reuse ? tracking_tiles.size() : 0;
       const std::uint64_t request_key =
           gaussian_id ^ (target_version * 0x9e3779b97f4a7c15ULL) ^
-          (observation.frame << 17U);
+          (observation.frame << 17U) ^ (observation.sequence << 29U);
       dependencies.register_tracking_request(request_key, tracking_tiles,
                                              prediction.reuse);
       if (prediction.reuse) {
@@ -539,8 +626,8 @@ Simulator::run(const std::filesystem::path &manifest_path) const {
           ++pending_by_tile[tile];
           std::uint64_t wait = 0;
           for (const std::uint32_t source : sources) {
-            if (mapping_finish.contains(source)) {
-              wait = std::max(wait, mapping_finish.at(source));
+            if (estimated_mapping_finish.contains(source)) {
+              wait = std::max(wait, estimated_mapping_finish.at(source));
             }
           }
           const std::uint64_t path =
@@ -550,44 +637,103 @@ Simulator::run(const std::filesystem::path &manifest_path) const {
                                         request_key, gaussian_id / 4, true});
         }
       }
-      const bool measured_description =
-          observation.verification_valid && observation.label != "conservative";
-      decisions.push_back(
-          {prediction,
-           {measured_description, true, measured_description,
-            observation.consumer_group, observation.consumer_generation,
-            gaussian_id, std::nullopt, std::nullopt},
-           tracking_tiles,
-           request_key});
+      group.members.push_back(
+          {prediction, tracking_tiles, std::move(sources), request_key});
     }
+    decisions.push_back(std::move(group));
   }
   const ReverseSchedule reverse = reverse_dataflow_schedule(reverse_candidates);
 
-  const auto resolve_decision = [&](PendingDecision &pending,
-                                    TileMaintenance *tiles) {
-    const MergeDecision decision = impact_pim.validate(pending.description);
-    predictor.feedback(pending.prediction, decision.kept_visible);
-    dependencies.resolve_tracking_request(pending.request_key);
-    if (!decision.kept_visible) {
-      array.issue(ArrayMode::Gaussian, macro.tail_ready_cycles, 8,
-                  pending.prediction.gaussian_id);
-    }
-    if (pending.prediction.reuse && tiles != nullptr) {
-      for (const std::uint32_t tile : pending.tracking_tiles) {
-        if (decision.kept_visible) {
-          tiles->confirm(tile);
-        } else {
-          correction_tiles.insert(tile);
-          if (!decision.description_valid) {
-            rebuild_tiles.insert(tile);
+  std::vector<std::uint32_t> mapping_issue_order;
+  std::unordered_set<std::uint32_t> scheduled_mapping_tiles;
+  for (const std::uint32_t tracking_tile : reverse.order) {
+    for (const PendingGroup &group : decisions) {
+      for (const PendingMember &member : group.members) {
+        if (!member.prediction.reuse ||
+            std::ranges::find(member.tracking_tiles, tracking_tile) ==
+                member.tracking_tiles.end()) {
+          continue;
+        }
+        for (const std::uint32_t source : member.source_tiles) {
+          if (scheduled_mapping_tiles.insert(source).second) {
+            mapping_issue_order.push_back(source);
           }
         }
       }
     }
-  };
-  for (PendingDecision &decision : decisions) {
-    if (!decision.prediction.reuse) {
-      resolve_decision(decision, nullptr);
+  }
+  const std::uint64_t reverse_prioritized_mapping_tiles =
+      mapping_issue_order.size();
+  for (const OrderedTile &tile : ordering.tiles) {
+    if (scheduled_mapping_tiles.insert(tile.tile_id).second) {
+      mapping_issue_order.push_back(tile.tile_id);
+    }
+  }
+
+  std::unordered_map<std::uint32_t, const OrderedTile *> ordered_tiles;
+  for (const OrderedTile &tile : ordering.tiles) {
+    ordered_tiles.emplace(tile.tile_id, &tile);
+  }
+  SharedGsArray array;
+  std::uint64_t owned_loss_tiles = 0;
+  std::uint64_t boundary_dependency_records = 0;
+  const std::uint64_t mapping_rows =
+      input.capture.mapping.gaussians_by_tile.size() /
+      input.capture.mapping.columns;
+  for (const std::uint32_t tile_id : mapping_issue_order) {
+    const OrderedTile &tile = *ordered_tiles.at(tile_id);
+    const std::uint64_t task_cycles =
+        ceil_div(tile.gaussian_relations, kPePerCluster);
+    array.issue(ArrayMode::Tile, 0, task_cycles, tile.tile_id);
+    const std::uint64_t x = tile.tile_id % input.capture.mapping.columns;
+    const std::uint64_t y = tile.tile_id / input.capture.mapping.columns;
+    boundary_dependency_records += x != 0 ? 1U : 0U;
+    boundary_dependency_records +=
+        x + 1 < input.capture.mapping.columns ? 1U : 0U;
+    boundary_dependency_records += y != 0 ? 1U : 0U;
+    boundary_dependency_records += y + 1 < mapping_rows ? 1U : 0U;
+    ++owned_loss_tiles;
+    static_cast<void>(dependencies.complete_mapping_tile(tile.tile_id));
+  }
+
+  std::vector<std::size_t> validation_order;
+  std::unordered_set<std::size_t> scheduled_groups;
+  std::uint64_t applied_reverse_issues = 0;
+  for (const std::uint32_t tracking_tile : reverse.order) {
+    for (std::size_t index = 0; index < decisions.size(); ++index) {
+      bool matches = false;
+      for (const PendingMember &member : decisions.at(index).members) {
+        matches = matches ||
+                  (member.prediction.reuse &&
+                   std::ranges::find(member.tracking_tiles, tracking_tile) !=
+                       member.tracking_tiles.end());
+      }
+      if (matches && scheduled_groups.insert(index).second) {
+        validation_order.push_back(index);
+        ++applied_reverse_issues;
+      }
+    }
+  }
+  for (std::size_t index = 0; index < decisions.size(); ++index) {
+    if (scheduled_groups.insert(index).second) {
+      validation_order.push_back(index);
+    }
+  }
+  for (const std::size_t index : validation_order) {
+    PendingGroup &group = decisions.at(index);
+    std::vector<std::uint64_t> gaussian_ids;
+    gaussian_ids.reserve(group.members.size());
+    for (const PendingMember &member : group.members) {
+      gaussian_ids.push_back(member.prediction.gaussian_id);
+    }
+    group.result = impact_pim.validate_group(group.description, gaussian_ids);
+    for (PendingMember &member : group.members) {
+      predictor.feedback(member.prediction, group.result->kept_visible);
+      dependencies.resolve_tracking_request(member.request_key);
+      if (!group.result->kept_visible) {
+        array.issue(ArrayMode::Gaussian, macro.tail_ready_cycles, 8,
+                    member.prediction.gaussian_id);
+      }
     }
   }
 
@@ -635,9 +781,24 @@ Simulator::run(const std::filesystem::path &manifest_path) const {
     tiles.record_contribution(tile, block.gradient_norm, pending_by_tile[tile]);
     dependencies.release_frame_tile(frame_tile_bytes);
   }
-  for (PendingDecision &decision : decisions) {
-    if (decision.prediction.reuse) {
-      resolve_decision(decision, &tiles);
+  for (const PendingGroup &group : decisions) {
+    if (!group.result.has_value()) {
+      throw std::runtime_error("impact group was not validated");
+    }
+    for (const PendingMember &member : group.members) {
+      if (!member.prediction.reuse) {
+        continue;
+      }
+      for (const std::uint32_t tile : member.tracking_tiles) {
+        if (group.result->kept_visible) {
+          tiles.confirm(tile);
+        } else {
+          correction_tiles.insert(tile);
+          if (!group.result->description_valid) {
+            rebuild_tiles.insert(tile);
+          }
+        }
+      }
     }
   }
   for (const StreamingBlock &block : input.capture.streaming_blocks) {
@@ -671,6 +832,18 @@ Simulator::run(const std::filesystem::path &manifest_path) const {
   const std::string impact_path = impact_pim.invalid_descriptions() == 0
                                       ? "impact_bound_validation"
                                       : "conservative_visible_advance";
+  const std::uint64_t captured_impact_descriptions = std::ranges::count_if(
+      input.capture.impacts, [](const ImpactObservation &observation) {
+        return observation.contribution.has_value();
+      });
+  const std::uint64_t captured_pose_pair_descriptions = std::ranges::count_if(
+      input.capture.impacts, [](const ImpactObservation &observation) {
+        return observation.contribution_source == "withdrawal_pose_pair";
+      });
+  const std::uint64_t captured_direct_descriptions = std::ranges::count_if(
+      input.capture.impacts, [](const ImpactObservation &observation) {
+        return observation.contribution_source == "captured_pose_update_delta";
+      });
   return {
       {"format", "cisda-simulation-result/v1"},
       {"status", "complete"},
@@ -678,6 +851,17 @@ Simulator::run(const std::filesystem::path &manifest_path) const {
        {{"name", input.manifest.name},
         {"model", input.manifest.workload},
         {"dataset", dataset_identity(input.bundle)}}},
+      {"mechanism_coverage",
+       {{"captured_impact_descriptions", captured_impact_descriptions},
+        {"captured_pose_pair_descriptions", captured_pose_pair_descriptions},
+        {"captured_direct_descriptions", captured_direct_descriptions},
+        {"captured_history_descriptions", captured_history_descriptions},
+        {"captured_history_feedback", captured_history_feedback},
+        {"target_history_ready_queries", target_history_ready_queries},
+        {"target_reuse_predictions", target_reuse_predictions},
+        {"speculative_path_exercised", target_reuse_predictions != 0},
+        {"reverse_order_applied", applied_reverse_issues != 0},
+        {"tile_correction_exercised", !correction_tiles.empty()}}},
       {"timing",
        {{"asic_frequency_mhz", 500},
         {"pim_frequency_mhz", 200},
@@ -732,7 +916,13 @@ Simulator::run(const std::filesystem::path &manifest_path) const {
           {"fill_requests", array.residency_fills()},
           {"fill_bytes", array.fill_bytes()},
           {"predictor_lookups", predictor.lookups()},
-          {"reuse_predictions", predictor.predictions()},
+          {"reuse_predictions", target_reuse_predictions},
+          {"chronological_reuse_predictions", predictor.predictions()},
+          {"chronological_history_ready_queries",
+           predictor.history_ready_queries()},
+          {"target_history_ready_queries", target_history_ready_queries},
+          {"target_reuse_predictions", target_reuse_predictions},
+          {"captured_history_feedback", captured_history_feedback},
           {"shared_prediction_requests", predictor.merged_requests()},
           {"predictor_feedback_updates", predictor.feedback_updates()},
           {"speculative_dependencies", speculative_dependencies},
@@ -826,7 +1016,9 @@ Simulator::run(const std::filesystem::path &manifest_path) const {
           {"shared_task_merges", reverse.shared_task_merges},
           {"asic_priority_propagations", reverse.asic_priority_propagations},
           {"pim_priority_propagations", reverse.pim_priority_propagations},
-          {"near_memory_row_groups", reverse.near_memory_row_groups}}}}},
+          {"near_memory_row_groups", reverse.near_memory_row_groups},
+          {"applied_validation_issues", applied_reverse_issues},
+          {"prioritized_mapping_tiles", reverse_prioritized_mapping_tiles}}}}},
       {"absolute_counts",
        {{"native_capture_records", input.capture.record_count},
         {"rasterizer_cycles", macro.render_cycles},

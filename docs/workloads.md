@@ -43,10 +43,16 @@ not preserve:
 - complete tile ranges and image dimensions;
 - real streaming block coordinates, valid pixels, and gradient norms;
 - consumer-group and version context;
-- native impact withdrawal evidence.
+- consecutive native impact withdrawal observations;
+- paired baseline/withdrawal poses or a direct six-component pose-update
+  difference.
 
-These records drive tile source sets, predictor queries, dependency sharing,
-PIM owner selection, pending tile validation, and pose-commit eligibility.
+These records drive tile source sets, chronologically ordered predictor query
+and feedback, atomic group validation, dependency sharing, PIM owner selection,
+pending tile validation, reverse issue priority, and pose-commit eligibility.
+Four prior actual decisions for a stable Gaussian are required before its
+target query can speculate. A capture without that prefix remains runnable but
+reports incomplete predictor coverage.
 
 ## Included Workloads
 

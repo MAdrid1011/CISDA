@@ -47,12 +47,14 @@ to Tracking. Every gradient-ready update writes primary attributes and
 optimizer state. Gaussian IDs shard update commands across eight PIM owners.
 
 For a valid pose, coverage, and target-version description, the state engine
-replaces the Gaussian's previous six-component contribution in its group and
-updates the cumulative bound. If every component remains within the group
-budget, visible attributes stay unchanged and a versioned confirmation is
-returned. Otherwise, the merge path advances the visible version and returns
-the required fields to the ASIC. Missing coefficients, stale versions, or
-invalid coverage always take this conservative advance path.
+atomically validates the captured stable-ID group and its six-component pose
+update difference. Translation components are expressed in meters and
+relative-rotation components in radians. The default component bounds are
+`1e-4`, matching the default pose-impact threshold. If every component remains
+within the group budget, all member Gaussians retain their visible attributes
+and receive versioned confirmations. Otherwise, all members advance together
+and the required fields return to the ASIC. Missing coefficients, stale
+versions, or invalid coverage always take this conservative advance path.
 
 Each observed Gaussian has an explicit primary and visible version record.
 The current pass continues to read the frozen source version, while completed
@@ -61,10 +63,11 @@ Gaussians are ordered by the number of rendering and validation consumers they
 unblock. Per-group six-component budgets are allocated from one global bound,
 so their component-wise sum does not exceed that bound.
 
-The current native captures intentionally carry conservative withdrawal
-evidence rather than invented six-component impact coefficients. Their runs
-therefore exercise primary update, owner routing, command completion, visible
-advance, and predictor feedback without reporting fabricated confirmations.
+`src/workload.cpp` obtains the six-dimensional description either from a
+captured pose-update delta or from the relative pose between native baseline
+and exact-withdrawal Tracking solves. A group-level observation is never split
+into fabricated per-Gaussian coefficients. Its one actual keep/advance result
+feeds every member Gaussian's predictor history.
 
 ## Stage III: Predictive Ray Rendering
 
@@ -78,11 +81,13 @@ history. A prediction may select old attributes only when:
 - the visible attributes are resident; and
 - their version matches the request.
 
-One query is shared by all dependent tile requests for the same update and
-Tracking context. The ImpactPIM response updates the stored counter index once
-and shifts the actual decision into history. Cold histories wait for the
-actual attributes, so the included conservative captures do not create false
-speculative work.
+Impact observations execute in captured frame, iteration, and sequence order.
+Each query receives its actual ImpactPIM outcome before the next observation
+is queried. One target query is shared by all dependent tile requests for the
+same Gaussian and Tracking context. Feedback updates the stored counter index
+once and shifts the actual decision into that Gaussian's history. Cold
+histories wait for actual attributes; speculation begins only after four real
+prior decisions have populated the history.
 
 The scheduled Tracking rasterizer supplies the complete point-list order for
 each tile. `src/shared_array.cpp` consumes that order directly, checks the CAM
@@ -156,6 +161,13 @@ When the predictor admits no speculative input, there is no pending reuse
 result to prioritize; the scheduler correctly reports zero candidates while
 the normal Gaussian-aware order remains active.
 
+For admitted candidates, the returned order is operational rather than
+advisory. It first promotes the candidate's unfinished Mapping source tiles in
+the shared-array issue stream, then orders the corresponding atomic ImpactPIM
+validation groups. Noncandidate work follows in the original Gaussian-aware
+order. The result reports both prioritized Mapping tiles and applied
+validation issues.
+
 ## ImpactPIM Organization
 
 `src/impact_pim.cpp` models eight owners, with two units per LPDDR5 die and one
@@ -189,3 +201,8 @@ on one timeline; completion traffic is charged before the pose commit.
 The output is deliberately compact. It reports end-to-end and stage cycles,
 updated objects and scalars, state bytes, PIM commands, prediction and merge
 events, shared-array mode tasks, tile validation, and the final commit count.
+`mechanism_coverage` separately records whether the selected capture supplied
+valid impact descriptions, valid predictor histories, speculative work,
+applied reverse ordering, and a correction event. A zero action count therefore
+describes the selected observation window rather than claiming that the path
+was exercised.

@@ -49,6 +49,7 @@ ReusePrediction ReusePredictor::query(std::uint64_t gaussian_id,
   }
   const std::uint16_t index = fold(gaussian_id, bits);
   const bool history_valid = history.size() == 4;
+  history_ready_queries_ += history_valid ? 1U : 0U;
   const bool reuse =
       history_valid && counters_.at(index) >= 2 && resident && version_match;
   predictions_ += reuse ? 1U : 0U;
@@ -82,6 +83,9 @@ std::uint64_t ReusePredictor::feedback_updates() const {
 }
 std::uint64_t ReusePredictor::merged_requests() const {
   return merged_requests_;
+}
+std::uint64_t ReusePredictor::history_ready_queries() const {
+  return history_ready_queries_;
 }
 
 } // namespace cisda

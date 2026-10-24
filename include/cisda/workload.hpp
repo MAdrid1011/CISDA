@@ -36,6 +36,7 @@ struct StreamingBlock {
 };
 
 struct ImpactObservation {
+  std::uint64_t sequence{};
   std::uint64_t frame{};
   std::uint64_t iteration{};
   std::uint64_t source_frame{};
@@ -45,6 +46,8 @@ struct ImpactObservation {
   std::uint64_t native_tile_index{};
   std::string label;
   bool verification_valid{};
+  std::optional<std::array<double, 6>> contribution;
+  std::string contribution_source;
   std::vector<std::string> stable_ids;
 };
 

@@ -53,30 +53,44 @@ void ImpactPim::bind_versions(std::uint64_t visible_version,
   versions_bound_ = true;
 }
 
-MergeDecision ImpactPim::validate(const ImpactDescription &description) {
+MergeDecision
+ImpactPim::validate_group(const ImpactDescription &description,
+                          const std::vector<std::uint64_t> &gaussian_ids) {
   if (!versions_bound_) {
     throw std::runtime_error("ImpactPIM versions were not bound");
+  }
+  if (gaussian_ids.empty()) {
+    throw std::runtime_error("ImpactPIM cannot validate an empty group");
   }
   const std::uint64_t owner = description.gaussian_id % owners_.size();
   const std::uint64_t die = owner / 2;
   const std::uint64_t unit = owner % 2;
   const std::uint64_t bank = (description.gaussian_id / owners_.size()) % 4;
-  owners_.at(owner) = true;
-  ++address_mappings_;
-  ++bank_access_counts_.at(owner).at(bank);
+  for (const std::uint64_t gaussian_id : gaussian_ids) {
+    const std::uint64_t member_owner = gaussian_id % owners_.size();
+    const std::uint64_t member_bank =
+        (gaussian_id / owners_.size()) % bank_access_counts_.at(0).size();
+    owners_.at(member_owner) = true;
+    ++address_mappings_;
+    ++bank_access_counts_.at(member_owner).at(member_bank);
+  }
   ++validation_microprograms_;
   micro_operations_ += 8 + field_layout_.size() * 6;
   if (primary_updates_ != 0) {
     ++late_validation_entries_;
   }
-  auto [state, inserted] = versions_.try_emplace(
-      description.gaussian_id, VersionState{target_version_, source_version_});
-  static_cast<void>(inserted);
-  ++version_checks_;
-  const bool valid = description.context_valid && description.version_match &&
+  bool versions_valid = true;
+  for (const std::uint64_t gaussian_id : gaussian_ids) {
+    auto [state, inserted] = versions_.try_emplace(
+        gaussian_id, VersionState{target_version_, source_version_});
+    static_cast<void>(inserted);
+    ++version_checks_;
+    versions_valid = versions_valid &&
                      state->second.primary == target_version_ &&
-                     state->second.visible == source_version_ &&
-                     description.coverage_stable &&
+                     state->second.visible == source_version_;
+  }
+  const bool valid = description.context_valid && description.version_match &&
+                     versions_valid && description.coverage_stable &&
                      group_budgets_.contains(description.group) &&
                      description.contribution.has_value();
   bool keep = false;
@@ -110,7 +124,7 @@ MergeDecision ImpactPim::validate(const ImpactDescription &description) {
       group.records.erase(old);
     }
   } else {
-    ++invalid_descriptions_;
+    invalid_descriptions_ += gaussian_ids.size();
     const auto group = groups_.find(description.group);
     if (group != groups_.end() &&
         group->second.generation == description.generation) {
@@ -127,19 +141,25 @@ MergeDecision ImpactPim::validate(const ImpactDescription &description) {
     }
   }
   if (keep) {
-    ++confirmations_;
+    confirmations_ += gaussian_ids.size();
   } else {
-    ++advances_;
-    state->second.visible = target_version_;
+    advances_ += gaussian_ids.size();
     const std::uint64_t full_mask =
         (std::uint64_t{1} << field_layout_.size()) - 1;
     const std::uint64_t mask =
         description.changed_field_mask.value_or(full_mask) & full_mask;
-    selected_field_writes_ += static_cast<std::uint64_t>(std::popcount(mask));
+    selected_field_writes_ +=
+        static_cast<std::uint64_t>(std::popcount(mask)) * gaussian_ids.size();
   }
-  completion_queue_.push_back(
-      {owner, state->second.visible, description.group, keep});
-  ++completion_records_;
+  for (const std::uint64_t gaussian_id : gaussian_ids) {
+    VersionState &state = versions_.at(gaussian_id);
+    if (!keep) {
+      state.visible = target_version_;
+    }
+    completion_queue_.push_back(
+        {gaussian_id % owners_.size(), state.visible, description.group, keep});
+    ++completion_records_;
+  }
   completion_queue_high_water_ = std::max<std::uint64_t>(
       completion_queue_high_water_, completion_queue_.size());
   return {keep,

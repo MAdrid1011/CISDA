@@ -10,4 +10,6 @@ and the Gaussian's actual-decision history.
 
 The module uses four history bits and 2,048 two-bit saturating counters.
 Gaussian-ID chunks XOR-fold to 11 bits, and the low four bits mix with history.
-Reuse additionally requires residency and version agreement.
+Reuse additionally requires residency and version agreement. Captured
+observations are queried and receive actual feedback in temporal order, so a
+valid history contains four prior native decisions for the same Gaussian.

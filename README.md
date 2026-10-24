@@ -67,8 +67,9 @@ The other manifests are `workloads/gaussian_slam.json` and
 
 The result contains absolute end-to-end cycles and latency, four-stage
 completion cycles, mechanism event counts, primary and visible state bytes,
-and one validated pose commit. It does not emit comparison or normalized
-results.
+one validated pose commit, and explicit coverage for captured impact,
+predictor history, speculation, applied reverse order, and correction. It does
+not emit comparison or normalized results.
 
 See [Architecture and Mechanisms](docs/architecture.md) for the simulator
 design. The [Mechanism Correspondence](docs/mechanism-correspondence.md) maps
