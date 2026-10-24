@@ -29,6 +29,8 @@ public:
 
   bool reserve_spm(std::uint64_t bytes);
   void release_spm(std::uint64_t bytes);
+  std::uint64_t spm_available_bytes() const;
+  void account_credit_stalls(std::uint64_t stalls);
   bool reserve_frame_tile(std::uint64_t bytes);
   void release_frame_tile(std::uint64_t bytes);
 

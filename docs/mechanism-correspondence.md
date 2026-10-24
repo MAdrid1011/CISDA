@@ -22,8 +22,8 @@ is zero.
 | IV-A 24-cluster reconfigurable GS array | `shared_array.cpp` | lane configuration, mode tasks, `packet_boundary_reconfigurations` |
 | IV-A residency groups and successor retention | `shared_array.cpp` | `clusters_per_residency_group`, `shared_projection_rows` |
 | IV-B four-bit history and 2,048 two-bit counters | `predictor.cpp` | predictor lookup, prediction, and feedback counts |
-| IV-B separate readiness/validation tables and credits | `dependency_tables.cpp` | table entries, buffer high-water marks, credit stalls |
-| IV-B reverse paths and eligible-only supply priority | `reverse_scheduler.cpp`, `simulator.cpp` | eligibility, fallback returns, reservations, task merges, `prioritized_mapping_tiles`, `applied_validation_issues` |
+| IV-B separate readiness/validation tables and credits | `dependency_tables.cpp` | table entries, available SPM bytes, buffer high-water marks, credit stalls |
+| IV-B reverse paths and credited supply priority | `reverse_scheduler.cpp`, `simulator.cpp` | eligibility, fallback returns, reserved attribute/tile bytes, task merges, `prioritized_mapping_tiles`, `applied_validation_issues` |
 | IV-C eight-owner update and validation programs | `impact_pim.cpp` | descriptors, microprograms, micro-operations, owner count |
 | IV-C die/group/bank mapping and field selection | `impact_pim.cpp` | address mappings, bank lanes, selected field writes |
 | IV-C tagged completion, late validation, and refresh | `impact_pim.cpp` | completion queue, late entries, drain/precharge/refresh/resume counts |

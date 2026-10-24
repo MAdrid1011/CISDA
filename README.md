@@ -1,9 +1,8 @@
 # CISDA Simulator
 
-CISDA is a C++20 mechanism-level simulator for continuity-guided,
-mixed-granularity 3D Gaussian Splatting SLAM. It executes Mapping and Tracking
-on one end-to-end timeline and reports mechanism-level cycle, event, and byte
-counts.
+CISDA is a C++20 simulator for continuity-guided, mixed-granularity 3D
+Gaussian Splatting SLAM. It executes Mapping and Tracking on one end-to-end
+timeline and reports cycle, event, and byte counts.
 
 The simulator implements:
 
@@ -15,8 +14,8 @@ The simulator implements:
 - versioned primary and Tracking-visible Gaussian state;
 - pending tile validation, local replacement, and final pose commit.
 
-The source tree is self-contained. Large workload assets stay in the ignored
-`local/` directory and are not part of the Git repository.
+Large workload assets are read from the ignored `local/` directory and are not
+part of the Git repository.
 
 ## Build
 
@@ -66,11 +65,10 @@ The other manifests are `workloads/gaussian_slam.json` and
 `workloads/vtgaussian_slam.json`. The command writes one
 `cisda-simulation-result/v1` JSON document to standard output.
 
-The result contains mechanism-level end-to-end cycles and latency, four-stage
-completion cycles, event counts, primary and visible state bytes, one validated
-pose commit, and explicit coverage for captured impact, predictor history,
-speculation, applied reverse order, and correction. It does not emit comparison
-or normalized results.
+The result contains end-to-end cycles and latency, four-stage completion
+cycles, event counts, primary and visible state bytes, one validated pose
+commit, and explicit coverage for captured impact, predictor history,
+speculation, applied reverse order, and correction.
 
 See [Architecture and Mechanisms](docs/architecture.md) for the simulator
 design. The [Mechanism Correspondence](docs/mechanism-correspondence.md) maps

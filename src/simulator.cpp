@@ -43,6 +43,7 @@ constexpr std::uint64_t kPimVectorBits = 256;
 constexpr std::uint64_t kMemoryDataRateMtps = 6'400;
 constexpr std::uint64_t kMemoryBusBits = 64;
 constexpr std::uint64_t kMemoryTransactionBytes = 64;
+constexpr std::uint64_t kTileContributionBytes = 64;
 constexpr std::uint64_t kGuardPixelsPerLane = 8;
 constexpr std::uint64_t kRadixRecordsPerCycle = 4;
 constexpr std::uint64_t kOptimizerMicroopsPerScalar = 13;
@@ -634,7 +635,9 @@ Simulator::run(const std::filesystem::path &manifest_path) const {
               ceil_div(profile.object_bytes, kPePerCluster) + 8;
           reverse_candidates.push_back({tile, macro.tail_ready_cycles, path,
                                         profile.projection_input_bytes, wait,
-                                        request_key, gaussian_id / 4, true});
+                                        request_key, gaussian_id / 4,
+                                        profile.projection_input_bytes,
+                                        kTileContributionBytes});
         }
       }
       group.members.push_back(
@@ -642,7 +645,20 @@ Simulator::run(const std::filesystem::path &manifest_path) const {
     }
     decisions.push_back(std::move(group));
   }
-  const ReverseSchedule reverse = reverse_dataflow_schedule(reverse_candidates);
+  const std::uint64_t reverse_storage_credit_bytes =
+      dependencies.spm_available_bytes();
+  const ReverseSchedule reverse = reverse_dataflow_schedule(
+      reverse_candidates, reverse_storage_credit_bytes);
+  const std::uint64_t reverse_reserved_bytes =
+      checked_add(reverse.reserved_attribute_bytes,
+                  reverse.reserved_tile_contribution_bytes,
+                  "reverse scheduler storage reservation");
+  if (!dependencies.reserve_spm(reverse_reserved_bytes)) {
+    throw std::runtime_error("reverse scheduler SPM reservation failed");
+  }
+  dependencies.account_credit_stalls(reverse.blocked_by_credits);
+  const std::unordered_set<std::uint32_t> reverse_reserved_tiles(
+      reverse.reserved_tile_ids.begin(), reverse.reserved_tile_ids.end());
 
   std::vector<std::uint32_t> mapping_issue_order;
   std::unordered_set<std::uint32_t> scheduled_mapping_tiles;
@@ -748,7 +764,8 @@ Simulator::run(const std::filesystem::path &manifest_path) const {
     if (!dependencies.reserve_frame_tile(frame_tile_bytes)) {
       throw std::runtime_error("Frame Tile Buffer credits exhausted");
     }
-    if (!dependencies.reserve_spm(64)) {
+    if (!reverse_reserved_tiles.contains(tile) &&
+        !dependencies.reserve_spm(kTileContributionBytes)) {
       throw std::runtime_error("SPM tile-contribution credits exhausted");
     }
     const std::uint64_t work =
@@ -815,7 +832,8 @@ Simulator::run(const std::filesystem::path &manifest_path) const {
     array.issue(ArrayMode::Tile, ray_finish, 4, block.slot);
   }
   tiles.commit_pose();
-  dependencies.release_spm(tiles.pending_tiles() * 64);
+  dependencies.release_spm(tiles.pending_tiles() * kTileContributionBytes);
+  dependencies.release_spm(reverse.reserved_attribute_bytes);
   dependencies.release_spm(recovery_credit_bytes);
   impact_pim.drain_completions();
 
@@ -1005,6 +1023,10 @@ Simulator::run(const std::filesystem::path &manifest_path) const {
           {"deduplicated_avoidable_bytes", reverse.deduplicated_bytes},
           {"blocked_by_storage_credits", reverse.blocked_by_credits},
           {"storage_reservations", reverse.storage_reservations},
+          {"available_storage_credit_bytes", reverse_storage_credit_bytes},
+          {"reserved_attribute_bytes", reverse.reserved_attribute_bytes},
+          {"reserved_tile_contribution_bytes",
+           reverse.reserved_tile_contribution_bytes},
           {"shared_task_merges", reverse.shared_task_merges},
           {"asic_priority_propagations", reverse.asic_priority_propagations},
           {"pim_priority_propagations", reverse.pim_priority_propagations},

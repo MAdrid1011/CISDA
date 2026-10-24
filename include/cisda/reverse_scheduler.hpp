@@ -13,17 +13,21 @@ struct ReverseCandidate {
   std::uint64_t waited_cycles{};
   std::uint64_t dependency_key{};
   std::uint64_t row_address{};
-  bool storage_credit{true};
+  std::uint64_t attribute_bytes{};
+  std::uint64_t tile_contribution_bytes{};
 };
 
 struct ReverseSchedule {
   std::vector<std::uint32_t> priority_order;
   std::vector<std::uint32_t> fallback_order;
+  std::vector<std::uint32_t> reserved_tile_ids;
   std::uint64_t deadline_eligible{};
   std::uint64_t rejected_by_window{};
   std::uint64_t deduplicated_bytes{};
   std::uint64_t blocked_by_credits{};
   std::uint64_t storage_reservations{};
+  std::uint64_t reserved_attribute_bytes{};
+  std::uint64_t reserved_tile_contribution_bytes{};
   std::uint64_t shared_task_merges{};
   std::uint64_t asic_priority_propagations{};
   std::uint64_t pim_priority_propagations{};
@@ -31,6 +35,7 @@ struct ReverseSchedule {
 };
 
 ReverseSchedule
-reverse_dataflow_schedule(const std::vector<ReverseCandidate> &candidates);
+reverse_dataflow_schedule(const std::vector<ReverseCandidate> &candidates,
+                          std::uint64_t storage_credit_bytes);
 
 } // namespace cisda

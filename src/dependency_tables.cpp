@@ -121,6 +121,14 @@ void DependencyTables::release_spm(std::uint64_t bytes) {
   spm_used_ -= bytes;
 }
 
+std::uint64_t DependencyTables::spm_available_bytes() const {
+  return spm_capacity_bytes() - spm_used_;
+}
+
+void DependencyTables::account_credit_stalls(std::uint64_t stalls) {
+  credit_stalls_ += stalls;
+}
+
 bool DependencyTables::reserve_frame_tile(std::uint64_t bytes) {
   if (bytes > frame_tile_capacity_bytes() - frame_tile_used_) {
     ++credit_stalls_;

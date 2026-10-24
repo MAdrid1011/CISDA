@@ -3,8 +3,8 @@
 ## External Interface
 
 `Simulator::run` accepts a manifest path and returns one
-`cisda-simulation-result/v1` JSON object with mechanism-level timing, event,
-byte, and committed-pose values.
+`cisda-simulation-result/v1` JSON object with timing, event, byte, and
+committed-pose values.
 
 ## Internal Mechanism
 
@@ -15,5 +15,6 @@ the final pose transition on one timeline. Impact observations query and feed
 back chronologically. Ray-mode work records pending tile contributions before
 ImpactPIM validates the predicted inputs; confirmation retains those results
 and advance schedules local replacement. Eligible reverse priority directly
-reorders source-tile and validation issue, while fallback work retains regular
-order.
+reorders source-tile and validation issue after deduplicated attribute and tile
+space is reserved from the current shared-SPM credits. Capacity-blocked work
+retains regular order.

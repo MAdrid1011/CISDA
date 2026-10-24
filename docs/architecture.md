@@ -144,10 +144,12 @@ the last producer, and consumer counts propagate priority when an update
 becomes ready.
 
 SPM and Frame Tile Buffer reservations precede issue. Completion and correction
-space is reserved before speculative work. Candidates without credits return
-to regular scheduling; eligible candidates propagate priority to both the ASIC
-issuer and PIM queue. Shared input/version tasks merge, and equal-priority
-near-memory requests group by row.
+space is reserved before speculative work. The reverse scheduler receives the
+remaining shared-SPM capacity, ranks deadline-eligible candidates, and reserves
+attribute space once per shared input/version key and 64-byte contribution
+space once per tile. Candidates that do not fit return to regular scheduling;
+credited candidates propagate priority to both the ASIC issuer and PIM queue.
+Equal-priority near-memory requests group by row.
 
 ## Reverse Dependency Scheduling
 
@@ -202,9 +204,9 @@ uses captured Gaussian-block relations, examined and blended ray operations,
 active pixels, optimizer objects, and scalar counts. ASIC and PIM work overlap
 on one timeline; completion traffic is charged before the pose commit.
 
-The output is deliberately compact. It reports end-to-end and stage cycles,
-updated objects and scalars, state bytes, PIM commands, prediction and merge
-events, shared-array mode tasks, tile validation, and the final commit count.
+The output reports end-to-end and stage cycles, updated objects and scalars,
+state bytes, PIM commands, prediction and merge events, shared-array mode
+tasks, tile validation, and the final commit count.
 `mechanism_coverage` separately records whether the selected capture supplied
 valid impact descriptions, valid predictor histories, speculative work,
 applied reverse ordering, and a correction event. A zero action count therefore
