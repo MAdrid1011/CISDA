@@ -94,7 +94,9 @@ each tile. `src/shared_array.cpp` consumes that order directly, checks the CAM
 entry's map and pose versions, extends residency for later consumers, and
 issues a fill for every missing or mismatched row. Each pending contribution
 retains its map, pose, and loss contexts until its input and validation
-dependencies are resolved.
+dependencies are resolved. Ray-mode rendering records that pending
+contribution before ImpactPIM returns the actual keep-or-advance decision, so
+confirmation retains the speculative result while advance selects correction.
 
 ## Stage IV: Tile Result Maintenance
 
@@ -161,12 +163,14 @@ When the predictor admits no speculative input, there is no pending reuse
 result to prioritize; the scheduler correctly reports zero candidates while
 the normal Gaussian-aware order remains active.
 
-For admitted candidates, the returned order is operational rather than
-advisory. It first promotes the candidate's unfinished Mapping source tiles in
-the shared-array issue stream, then orders the corresponding atomic ImpactPIM
-validation groups. Noncandidate work follows in the original Gaussian-aware
-order. The result reports both prioritized Mapping tiles and applied
-validation issues.
+For admitted candidates, `priority_order` is operational rather than advisory.
+It first promotes the candidate's unfinished Mapping source tiles in the
+shared-array issue stream, then orders the corresponding atomic ImpactPIM
+validation groups. Window-expired or credit-blocked candidates are returned in
+`fallback_order` for accounting only; they receive no issue priority.
+Noncandidate and fallback work follows in the original Gaussian-aware order.
+The result reports both prioritized Mapping tiles and applied validation
+issues.
 
 ## ImpactPIM Organization
 

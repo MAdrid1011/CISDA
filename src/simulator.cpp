@@ -646,7 +646,7 @@ Simulator::run(const std::filesystem::path &manifest_path) const {
 
   std::vector<std::uint32_t> mapping_issue_order;
   std::unordered_set<std::uint32_t> scheduled_mapping_tiles;
-  for (const std::uint32_t tracking_tile : reverse.order) {
+  for (const std::uint32_t tracking_tile : reverse.priority_order) {
     for (const PendingGroup &group : decisions) {
       for (const PendingMember &member : group.members) {
         if (!member.prediction.reuse ||
@@ -699,7 +699,7 @@ Simulator::run(const std::filesystem::path &manifest_path) const {
   std::vector<std::size_t> validation_order;
   std::unordered_set<std::size_t> scheduled_groups;
   std::uint64_t applied_reverse_issues = 0;
-  for (const std::uint32_t tracking_tile : reverse.order) {
+  for (const std::uint32_t tracking_tile : reverse.priority_order) {
     for (std::size_t index = 0; index < decisions.size(); ++index) {
       bool matches = false;
       for (const PendingMember &member : decisions.at(index).members) {
@@ -719,24 +719,6 @@ Simulator::run(const std::filesystem::path &manifest_path) const {
       validation_order.push_back(index);
     }
   }
-  for (const std::size_t index : validation_order) {
-    PendingGroup &group = decisions.at(index);
-    std::vector<std::uint64_t> gaussian_ids;
-    gaussian_ids.reserve(group.members.size());
-    for (const PendingMember &member : group.members) {
-      gaussian_ids.push_back(member.prediction.gaussian_id);
-    }
-    group.result = impact_pim.validate_group(group.description, gaussian_ids);
-    for (PendingMember &member : group.members) {
-      predictor.feedback(member.prediction, group.result->kept_visible);
-      dependencies.resolve_tracking_request(member.request_key);
-      if (!group.result->kept_visible) {
-        array.issue(ArrayMode::Gaussian, macro.tail_ready_cycles, 8,
-                    member.prediction.gaussian_id);
-      }
-    }
-  }
-
   TileMaintenance tiles;
   const std::uint64_t loss_context =
       input.capture.streaming_blocks.front().loss_context;
@@ -781,11 +763,21 @@ Simulator::run(const std::filesystem::path &manifest_path) const {
     tiles.record_contribution(tile, block.gradient_norm, pending_by_tile[tile]);
     dependencies.release_frame_tile(frame_tile_bytes);
   }
-  for (const PendingGroup &group : decisions) {
-    if (!group.result.has_value()) {
-      throw std::runtime_error("impact group was not validated");
-    }
+  for (const std::size_t index : validation_order) {
+    PendingGroup &group = decisions.at(index);
+    std::vector<std::uint64_t> gaussian_ids;
+    gaussian_ids.reserve(group.members.size());
     for (const PendingMember &member : group.members) {
+      gaussian_ids.push_back(member.prediction.gaussian_id);
+    }
+    group.result = impact_pim.validate_group(group.description, gaussian_ids);
+    for (PendingMember &member : group.members) {
+      predictor.feedback(member.prediction, group.result->kept_visible);
+      dependencies.resolve_tracking_request(member.request_key);
+      if (!group.result->kept_visible) {
+        array.issue(ArrayMode::Gaussian, ray_finish, 8,
+                    member.prediction.gaussian_id);
+      }
       if (!member.prediction.reuse) {
         continue;
       }

@@ -17,7 +17,8 @@ struct ReverseCandidate {
 };
 
 struct ReverseSchedule {
-  std::vector<std::uint32_t> order;
+  std::vector<std::uint32_t> priority_order;
+  std::vector<std::uint32_t> fallback_order;
   std::uint64_t deadline_eligible{};
   std::uint64_t rejected_by_window{};
   std::uint64_t deduplicated_bytes{};

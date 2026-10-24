@@ -10,6 +10,8 @@ dependency key, and storage-credit state.
 
 Eligible work is ranked by bytes per path cycle, then deadline and age. The
 scheduler merges shared tasks, reserves storage, propagates priority to ASIC
-and PIM queues, groups equal-priority memory rows, and returns ineligible work
-to regular order. `Simulator::run` applies the returned order to Mapping source
-tile issue and atomic ImpactPIM validation issue.
+and PIM queues, and groups equal-priority memory rows. It returns eligible,
+credited tiles in `priority_order` and window-expired or credit-blocked tiles
+in `fallback_order`. `Simulator::run` applies only `priority_order` to Mapping
+source-tile issue and atomic ImpactPIM validation issue; fallback work retains
+the regular Gaussian-aware order.

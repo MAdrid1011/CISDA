@@ -60,10 +60,11 @@ reverse_dataflow_schedule(const std::vector<ReverseCandidate> &candidates) {
       [](const ReverseCandidate &left, const ReverseCandidate &right) {
         return left.tile_id < right.tile_id;
       });
-  result.order.reserve(candidates.size());
+  result.priority_order.reserve(eligible.size());
+  result.fallback_order.reserve(fallback.size());
   std::set<std::pair<std::uint64_t, std::uint64_t>> priority_rows;
   for (const ReverseCandidate &candidate : eligible) {
-    result.order.push_back(candidate.tile_id);
+    result.priority_order.push_back(candidate.tile_id);
     ++result.storage_reservations;
     ++result.asic_priority_propagations;
     ++result.pim_priority_propagations;
@@ -74,7 +75,7 @@ reverse_dataflow_schedule(const std::vector<ReverseCandidate> &candidates) {
   }
   result.near_memory_row_groups = priority_rows.size();
   for (const ReverseCandidate &candidate : fallback) {
-    result.order.push_back(candidate.tile_id);
+    result.fallback_order.push_back(candidate.tile_id);
   }
   return result;
 }
